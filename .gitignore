@@ -1,0 +1,7 @@
+build/
+*.tar.xz
+*.ko
+*.ko.zst
+*.o
+.config
+Module.symvers

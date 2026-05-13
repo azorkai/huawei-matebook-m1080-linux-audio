@@ -1,0 +1,17 @@
+--- a/sound/soc/amd/acp/acp3x-es83xx/acp3x-es83xx.c	2026-05-08 09:42:26.000000000 +0300
++++ b/sound/soc/amd/acp/acp3x-es83xx/acp3x-es83xx.c	2026-05-13 17:46:44.392787430 +0300
+@@ -383,6 +383,14 @@
+ 		},
+ 		.driver_data = (void *)(ES83XX_ENABLE_DMIC),
+ 	},
++	{
++		.matches = {
++			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "HUAWEI"),
++			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "HVY-WXX9"),
++			DMI_EXACT_MATCH(DMI_PRODUCT_VERSION, "M1080"),
++		},
++		.driver_data = (void *)(ES83XX_ENABLE_DMIC),
++	},
+ 	{}
+ };
+ 

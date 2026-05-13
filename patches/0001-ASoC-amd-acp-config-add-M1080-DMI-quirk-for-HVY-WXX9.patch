@@ -1,0 +1,23 @@
+--- a/sound/soc/amd/acp-config.c	2026-05-08 09:42:26.000000000 +0300
++++ b/sound/soc/amd/acp-config.c	2026-05-13 17:46:37.605987429 +0300
+@@ -169,6 +169,20 @@
+ 			{}
+ 		},
+ 	},
++	{
++		.flags = FLAG_AMD_LEGACY,
++		.device = ACP_PCI_DEV_ID,
++		.dmi_table = (const struct dmi_system_id []) {
++			{
++				.matches = {
++					DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "HUAWEI"),
++					DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "HVY-WXX9"),
++					DMI_EXACT_MATCH(DMI_PRODUCT_VERSION, "M1080"),
++				},
++			},
++			{}
++		},
++	},
+ };
+ 
+ static int snd_amd_acp_acpi_find_config(struct pci_dev *pci)
