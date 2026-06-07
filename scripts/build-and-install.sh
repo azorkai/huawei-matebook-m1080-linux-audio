@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 #
 # Build and install the M1080 audio quirk modules for the running kernel.
-# Re-run this after every kernel upgrade. Takes about 30 seconds end-to-end.
+#
+# This is the manual fallback. The recommended path is scripts/install-dkms.sh,
+# which does the same thing automatically on every kernel upgrade. Use this when
+# you don't want DKMS, or to debug a build.
+#
+# Re-run after every kernel upgrade. ~30 seconds once the source is cached.
 
 set -euo pipefail
 
@@ -20,7 +25,7 @@ echo "Work directory  : $WORK"
 echo
 
 # --- sanity checks ---------------------------------------------------------
-for cmd in curl tar make gcc bc zstd xz patch sudo; do
+for cmd in curl tar make bc zstd xz patch sudo; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         echo "Missing tool: $cmd" >&2
         exit 1
@@ -33,6 +38,37 @@ if [ ! -d "/lib/modules/$KVER_FULL/build" ]; then
     exit 1
 fi
 
+KCONFIG="/lib/modules/$KVER_FULL/build/.config"
+if [ ! -r "$KCONFIG" ]; then
+    echo "Kernel .config missing at $KCONFIG" >&2
+    exit 1
+fi
+
+# --- match the kernel's toolchain ------------------------------------------
+# CachyOS and friends build with Clang/LLD; mainline Arch uses GCC. The module
+# MUST be built the same way or the prepared tree carries flags the other
+# compiler rejects (clang trips over -mrecord-mcount, gcc over Clang-only opts).
+# This was the most common reason the old script "didn't work" for people.
+LLVM_FLAG=()
+if grep -q '^CONFIG_CC_IS_CLANG=y' "$KCONFIG"; then
+    echo "Kernel built with Clang/LLD -> building with LLVM=1"
+    LLVM_FLAG=(LLVM=1)
+    for t in clang ld.lld llvm-objcopy; do
+        if ! command -v "$t" >/dev/null 2>&1; then
+            echo "Missing tool: $t (needed for a Clang-built kernel)" >&2
+            echo "Install the LLVM toolchain (e.g. 'sudo pacman -S llvm clang lld')." >&2
+            exit 1
+        fi
+    done
+else
+    echo "Kernel built with GCC -> building with GCC"
+    if ! command -v gcc >/dev/null 2>&1; then
+        echo "Missing tool: gcc" >&2
+        exit 1
+    fi
+fi
+echo
+
 # --- fetch matching kernel source ------------------------------------------
 mkdir -p "$WORK"
 cd "$WORK"
@@ -42,9 +78,10 @@ TARBALL="linux-$KVER.tar.xz"
 URL="https://cdn.kernel.org/pub/linux/kernel/v${KMAJOR}.x/$TARBALL"
 
 if [ ! -d "$SRC_DIR" ]; then
-    if [ ! -f "$TARBALL" ]; then
+    if [ ! -s "$TARBALL" ]; then
         echo "Downloading $URL ..."
-        curl -fL --progress-bar -o "$TARBALL" "$URL"
+        curl -fL --retry 3 --progress-bar -o "$TARBALL.partial" "$URL"
+        mv "$TARBALL.partial" "$TARBALL"
     fi
     echo "Extracting $TARBALL ..."
     tar xf "$TARBALL"
@@ -61,29 +98,30 @@ for p in "$PATCH_DIR"/*.patch; do
         echo "Applying $name"
         patch -p1 < "$p" >/dev/null
     else
-        echo "ERROR: $name does not apply cleanly." >&2
+        echo "ERROR: $name does not apply cleanly to linux-$KVER." >&2
+        echo "The source layout may have changed; please open an issue." >&2
         exit 1
     fi
 done
 
 # --- reuse the installed kernel's config + symbol versions -----------------
-echo "Importing /proc/config.gz ..."
-zcat /proc/config.gz > .config
+echo "Using $KCONFIG"
+cp "$KCONFIG" .config
 cp "/lib/modules/$KVER_FULL/build/Module.symvers" .
 
 echo "Running olddefconfig ..."
-make olddefconfig >/dev/null
+make "${LLVM_FLAG[@]}" olddefconfig >/dev/null
 
 echo "Preparing build (modules_prepare) ..."
-make -j"$(nproc)" modules_prepare >/dev/null
+make "${LLVM_FLAG[@]}" -j"$(nproc)" modules_prepare >/dev/null
 
-# Force UTS_RELEASE so vermagic embedded in the .ko matches the installed
-# kernel exactly. Without this, modprobe refuses the module.
+# Pin UTS_RELEASE so vermagic matches the installed kernel; otherwise modprobe
+# refuses the module. uname -r already carries the full local suffix.
 echo "#define UTS_RELEASE \"$KVER_FULL\"" > include/generated/utsrelease.h
 
 # --- build only the two modules we care about ------------------------------
 echo "Building snd-acp-config.ko and snd-acp-legacy-mach.ko ..."
-make -j"$(nproc)" M=sound/soc/amd modules >/dev/null
+make "${LLVM_FLAG[@]}" -j"$(nproc)" M=sound/soc/amd modules >/dev/null
 
 NEW_CFG="sound/soc/amd/snd-acp-config.ko"
 NEW_MACH="sound/soc/amd/acp/snd-acp-legacy-mach.ko"
@@ -101,7 +139,7 @@ DEST_DIR="/lib/modules/$KVER_FULL/kernel/sound/soc/amd"
 install_module() {
     local src="$1"
     local dest="$2"
-    echo "  → $dest"
+    echo "  -> $dest"
     if [ -f "$dest" ] && [ ! -f "$dest.bak" ]; then
         sudo cp -- "$dest" "$dest.bak"
     fi
@@ -117,7 +155,7 @@ echo "Running depmod ..."
 sudo depmod -a
 
 echo
-echo "Done. Verify with:"
+echo "Verify (should print the running kernel version):"
 echo "    modinfo snd_acp_legacy_mach | grep vermagic"
 echo
 echo "Then reboot:"
