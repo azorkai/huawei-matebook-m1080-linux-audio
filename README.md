@@ -25,9 +25,13 @@ cat /sys/class/dmi/id/product_version # -> M1080
 aplay -l                              # only HDMI devices, no analog playback
 ```
 
-If `product_version` is M1010, M1020 or M1040 instead, mainline already supports
-you — update your kernel. This repo is specifically for **M1080**, which upstream
-doesn't recognise yet.
+If your `product_version` is M1010, M1020 or M1040 **and** your `product_name` is
+one mainline already matches (`KLVL-WXXW`, `KLVL-WXX9`, `BOM-WXX9` or `HVY-WXX9`),
+just update your kernel and you're done. If you're on one of those revisions but a
+*different* board string (for example `NBM-WXX9`), upstream doesn't match you yet
+either — the fix is the same as below, just swap the M1080 strings for your own.
+This repo ships the **M1080** quirk specifically, which upstream doesn't recognise
+at all.
 
 ## The problem
 
