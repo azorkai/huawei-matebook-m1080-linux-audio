@@ -23,6 +23,21 @@ bad()  { echo "  [FAIL] $*"; }
 verdict=""
 set_verdict() { [ -z "$verdict" ] && verdict="$1"; }
 
+# Modules ship compressed and the scheme varies by distro.
+module_text() {
+    case "$1" in
+        *.zst) zstdcat -- "$1" 2>/dev/null ;;
+        *.xz)  xzcat   -- "$1" 2>/dev/null ;;
+        *.gz)  zcat    -- "$1" 2>/dev/null ;;
+        *)     cat     -- "$1" 2>/dev/null ;;
+    esac
+}
+
+# Count matches rather than `grep -q`: with pipefail set, grep -q exits on the
+# first hit, the decompressor upstream dies of SIGPIPE, and the whole pipeline
+# reports failure even though the string was found. grep -c drains its input.
+pipe_count() { grep -c "$1" 2>/dev/null || true; }
+
 echo "== hardware =="
 board="$(cat /sys/class/dmi/id/board_vendor 2>/dev/null || echo '?')"
 prod="$(cat /sys/class/dmi/id/product_name 2>/dev/null || echo '?')"
@@ -58,7 +73,7 @@ else
         set_verdict "Run ./scripts/install-dkms.sh to install the fix permanently"
     else
         echo "$status" | sed 's/^/  /'
-        if echo "$status" | grep -q "$KVER.*installed"; then
+        if grep -q "$KVER.*installed" <<<"$status"; then
             ok "built and installed for the running kernel"
         else
             bad "registered but NOT installed for $KVER — this is why there is no sound"
@@ -85,8 +100,8 @@ for m in snd_acp_config snd_acp_legacy_mach; do
     fi
     # A patched module carries the M1080 DMI string; the stock one does not.
     # That is the only check that actually proves the fix is in place.
-    if case "$path" in *.zst) zstdcat -- "$path" 2>/dev/null;; *.xz) xzcat -- "$path" 2>/dev/null;; *) cat -- "$path" 2>/dev/null;; esac \
-        | strings 2>/dev/null | grep -q 'M1080'; then
+    hits="$(module_text "$path" | strings 2>/dev/null | pipe_count 'M1080')"
+    if [ "${hits:-0}" -gt 0 ]; then
         ok "$m is PATCHED  ($path)"
     else
         bad "$m is the STOCK module, no M1080 quirk  ($path)"
@@ -96,12 +111,13 @@ done
 
 echo
 echo "== sound card =="
-if aplay -l 2>/dev/null | grep -qi 'es83'; then
+cards="$(aplay -l 2>/dev/null || true)"
+if grep -qi 'es83' <<<"$cards"; then
     ok "ES8316 card present:"
-    aplay -l 2>/dev/null | grep -i 'es83' | sed 's/^/    /'
+    grep -i 'es83' <<<"$cards" | sed 's/^/    /'
 else
     bad "no ES8316 card — only these playback devices exist:"
-    aplay -l 2>/dev/null | grep '^card' | sed 's/^/    /' || echo "    (none)"
+    grep '^card' <<<"$cards" | sed 's/^/    /' || echo "    (none)"
     set_verdict "${verdict:-The quirk is not taking effect. Reboot after installing, then re-run this script}"
 fi
 
@@ -111,13 +127,13 @@ if command -v wpctl >/dev/null 2>&1; then
     sinks="$(wpctl status 2>/dev/null | sed -n '/Sinks:/,/^ *[├└]/p' | grep -E '^\s*\W*\s*[0-9]+\.' || true)"
     if [ -n "$sinks" ]; then
         echo "$sinks" | sed 's/^/  /'
-        if echo "$sinks" | grep -q '\*.*[Ss]peaker'; then
+        if grep -q '\*.*[Ss]peaker' <<<"$sinks"; then
             ok "speakers are the default sink"
-        elif echo "$sinks" | grep -qi 'speaker'; then
+        elif grep -qi 'speaker' <<<"$sinks"; then
             warn "a speaker sink exists but is not the default"
             set_verdict "Point PipeWire at the speakers: wpctl set-default <id of the speaker sink>"
         fi
-        if echo "$sinks" | grep -q 'MUTED'; then
+        if grep -q 'MUTED' <<<"$sinks"; then
             warn "the default sink is MUTED"
         fi
     else
