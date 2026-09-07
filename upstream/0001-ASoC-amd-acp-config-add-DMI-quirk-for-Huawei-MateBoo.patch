@@ -1,0 +1,54 @@
+From 8a147efafbbf60d492d7ae1f18af5627e4a7d03c Mon Sep 17 00:00:00 2001
+From: azorkai <e.guven@hotmail.com.tr>
+Date: Mon, 7 Sep 2026 17:24:27 +0300
+Subject: [PATCH 1/2] ASoC: amd: acp-config: add DMI quirk for Huawei MateBook
+ M1080
+
+The Huawei MateBook D16 identified by board vendor "HUAWEI", product name
+"HVY-WXX9" and product version "M1080" carries the same AMD Renoir ACP
+block wired to an ES8316 codec as the MateBook revisions already listed
+here (M1010, M1020, M1040), but none of the existing entries match its
+DMI strings.
+
+Without a match snd_amd_acp_find_config() does not return
+FLAG_AMD_LEGACY for this board, so the legacy ACP backend is never
+selected, the acp3x-es83xx platform device is never created, and the
+machine ends up with no analog playback path at all - only the HDMI
+codec shows up in aplay -l and the internal speakers stay silent.
+
+Add an entry for the M1080 revision, identical in shape to the existing
+MateBook entries, so the legacy ACP path is selected on this board too.
+
+Signed-off-by: azorkai <e.guven@hotmail.com.tr>
+---
+ sound/soc/amd/acp-config.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/sound/soc/amd/acp-config.c b/sound/soc/amd/acp-config.c
+index 0d977f4..4282707 100644
+--- a/sound/soc/amd/acp-config.c
++++ b/sound/soc/amd/acp-config.c
+@@ -183,6 +183,20 @@ static const struct config_entry config_table[] = {
+ 			{}
+ 		},
+ 	},
++	{
++		.flags = FLAG_AMD_LEGACY,
++		.device = ACP_PCI_DEV_ID,
++		.dmi_table = (const struct dmi_system_id []) {
++			{
++				.matches = {
++					DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "HUAWEI"),
++					DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "HVY-WXX9"),
++					DMI_EXACT_MATCH(DMI_PRODUCT_VERSION, "M1080"),
++				},
++			},
++			{}
++		},
++	},
+ };
+ 
+ static int snd_amd_acp_acpi_find_config(struct pci_dev *pci)
+-- 
+2.55.0
+

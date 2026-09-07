@@ -1,0 +1,45 @@
+From 11ededdd646cd24ececcfe8323f56d548d2f3840 Mon Sep 17 00:00:00 2001
+From: azorkai <e.guven@hotmail.com.tr>
+Date: Mon, 7 Sep 2026 17:24:27 +0300
+Subject: [PATCH 2/2] ASoC: amd: acp3x-es83xx: add DMI quirk for Huawei
+ MateBook M1080
+
+With the M1080 revision now selecting the legacy ACP backend, the
+acp3x-es83xx machine driver still needs its own DMI entry: the codec
+quirk table is what supplies the ES83XX_ENABLE_DMIC flag that wires up
+the speaker and digital microphone DAI links. Without it the platform
+device is created but no codec configuration is applied.
+
+The board uses the default 12.288 MHz master clock, so ES83XX_ENABLE_DMIC
+alone is correct here - ES83XX_48_MHZ_MCLK is not needed, and setting it
+produces audible distortion on this hardware.
+
+Add the matching M1080 entry alongside the existing MateBook ones.
+
+Signed-off-by: azorkai <e.guven@hotmail.com.tr>
+---
+ sound/soc/amd/acp/acp3x-es83xx/acp3x-es83xx.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/sound/soc/amd/acp/acp3x-es83xx/acp3x-es83xx.c b/sound/soc/amd/acp/acp3x-es83xx/acp3x-es83xx.c
+index 46fff56..586f525 100644
+--- a/sound/soc/amd/acp/acp3x-es83xx/acp3x-es83xx.c
++++ b/sound/soc/amd/acp/acp3x-es83xx/acp3x-es83xx.c
+@@ -382,6 +382,14 @@ static const struct dmi_system_id acp3x_es83xx_dmi_table[] = {
+ 		},
+ 		.driver_data = (void *)(ES83XX_ENABLE_DMIC),
+ 	},
++	{
++		.matches = {
++			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "HUAWEI"),
++			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "HVY-WXX9"),
++			DMI_EXACT_MATCH(DMI_PRODUCT_VERSION, "M1080"),
++		},
++		.driver_data = (void *)(ES83XX_ENABLE_DMIC),
++	},
+ 	{}
+ };
+ 
+-- 
+2.55.0
+

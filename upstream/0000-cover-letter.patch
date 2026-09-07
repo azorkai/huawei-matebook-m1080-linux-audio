@@ -1,0 +1,52 @@
+From 11ededdd646cd24ececcfe8323f56d548d2f3840 Mon Sep 17 00:00:00 2001
+From: azorkai <e.guven@hotmail.com.tr>
+Date: Mon, 7 Sep 2026 17:24:27 +0300
+Subject: [PATCH 0/2] ASoC: amd: add DMI quirks for Huawei MateBook M1080
+
+The Huawei MateBook D16 with board name "HVY-WXX9" and product version
+"M1080" ships the same AMD Renoir ACP block and ES8316 codec as the
+MateBook revisions already handled in these two quirk tables (M1010,
+M1020, M1040), but its DMI strings match no existing entry.
+
+The result is a board with no analog playback at all. snd_acp_config
+never returns FLAG_AMD_LEGACY for it, so the legacy ACP backend is not
+selected and the acp3x-es83xx platform device never gets a driver bound.
+Only the HDMI codec shows up in aplay -l, and the internal speakers are
+silent on every current kernel.
+
+Both tables need an entry, hence two patches. Each adds a single entry
+identical in shape to the neighbouring MateBook ones - 22 added lines in
+total, changing no behaviour on any other machine, since they take effect
+only on an exact three-way DMI match.
+
+With both applied the card comes up as
+
+  card 1: acp3xes83xx [acp3x-es83xx], device 0: ES8316 HiFi-0
+
+and PipeWire exposes a working "Audio Coprocessor Speakers" sink.
+
+The board uses the default 12.288 MHz master clock, so ES83XX_ENABLE_DMIC
+alone is correct here; ES83XX_48_MHZ_MCLK produces audible distortion on
+this hardware.
+
+Confirmed on two independent M1080 units, both MateBook D16 with a Ryzen 5
+4600H (Renoir), reporting identical DMI strings:
+
+  board_vendor    : HUAWEI
+  product_name    : HVY-WXX9
+  product_version : M1080
+
+The change has been carried out of tree as a DKMS module since May 2026:
+https://github.com/azorkai/huawei-matebook-m1080-linux-audio
+
+azorkai (2):
+  ASoC: amd: acp-config: add DMI quirk for Huawei MateBook M1080
+  ASoC: amd: acp3x-es83xx: add DMI quirk for Huawei MateBook M1080
+
+ sound/soc/amd/acp-config.c                    | 14 ++++++++++++++
+ sound/soc/amd/acp/acp3x-es83xx/acp3x-es83xx.c |  8 ++++++++
+ 2 files changed, 22 insertions(+)
+
+-- 
+2.55.0
+
