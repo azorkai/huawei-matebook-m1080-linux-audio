@@ -15,6 +15,7 @@ for the M1080 revision, nothing else.
 > cd huawei-matebook-m1080-linux-audio
 > ./scripts/install-dkms.sh
 > sudo systemctl reboot
+> ./scripts/doctor.sh   # after the reboot: confirms the fix is actually live
 > ```
 
 ## Is this you?
@@ -95,6 +96,34 @@ matebook-m1080-audio/1.0.0, <your-kernel>, x86_64: installed
 
 and it rebuilds silently on every future kernel upgrade.
 
+`install-dkms.sh` fails loudly if the build did not actually produce an installed
+module, so a broken install can't masquerade as a working one.
+
+**If kernel.org is unreachable.** That download runs unattended from your package
+manager's DKMS hook, moments after a kernel upgrade — a moment when DNS, a VPN or
+the network itself is often still settling. The fetcher therefore tries
+`cdn.kernel.org`, `mirrors.edge.kernel.org` and `www.kernel.org` in turn, retries
+each, and verifies the archive before trusting it. If every mirror fails it falls
+back to the nearest cached source in the same stable series (7.1.1 for a 7.1.4
+kernel, say) rather than leaving you with silent speakers; the module ABI comes
+from *your* kernel's `Module.symvers` and `.config`, so this is normally fine, and
+it is logged loudly so you can rebuild later. Set `M1080_NO_FALLBACK=1` to turn
+that off and fail hard instead.
+
+On a machine with no internet at all, pre-seed the cache by hand:
+
+```bash
+# download linux-<your-version>.tar.xz elsewhere, then:
+sudo mkdir -p /var/cache/matebook-m1080-audio
+sudo cp linux-7.1.4.tar.xz /var/cache/matebook-m1080-audio/
+```
+
+Behind a corporate mirror? Point the fetcher at it — it appends `vN.x/linux-….tar.xz`:
+
+```bash
+export M1080_MIRROR=https://your-mirror.example/pub/linux/kernel
+```
+
 **Uninstall**
 
 ```bash
@@ -125,6 +154,31 @@ matching kernel source, applies the patches, reuses your installed kernel's
 > people on Clang-built kernels. If you hit a build error full of
 > `clang: error: unknown argument` or `unsupported option '-mrecord-mcount'`,
 > you're on an old copy of the script; `git pull` and retry.
+
+## Sound broke again? Run the doctor
+
+```bash
+./scripts/doctor.sh
+```
+
+It checks the whole chain in order — DMI strings, kernel headers, DKMS state, whether
+the modules on disk are the patched ones or the stock ones, whether the ES8316 card
+came up, and where PipeWire is routing — then prints the single command that fixes
+what it found.
+
+The failure it exists for is the quiet one. When a DKMS build fails during a kernel
+upgrade the module is left merely *added* instead of *installed*, and the error
+scrolls past in the middle of a pacman transaction. Nothing tells you afterwards;
+the speakers simply stop working, and `dkms status` prints something that looks
+close enough to fine at a glance:
+
+```
+matebook-m1080-audio/1.0.0: added              <- NOT installed, no sound
+matebook-m1080-audio/1.0.0, 7.1.4-1-cachyos, x86_64: installed   <- good
+```
+
+`doctor.sh` is also the right thing to paste into an issue. It is read-only and
+needs no root.
 
 ## After rebooting: no sound yet?
 
@@ -157,7 +211,12 @@ LLVM=()
 grep -q '^CONFIG_CC_IS_CLANG=y' "$KCFG" && LLVM=(LLVM=1)
 
 # 1. matching kernel source
-curl -O https://cdn.kernel.org/pub/linux/kernel/v${KVER%%.*}.x/linux-$KVER.tar.xz
+#    -f so a failed download is an error instead of a saved HTML error page,
+#    and fall through to a second mirror if the CDN is unreachable.
+curl -fL --retry 3 --retry-all-errors -O \
+     https://cdn.kernel.org/pub/linux/kernel/v${KVER%%.*}.x/linux-$KVER.tar.xz ||
+curl -fL --retry 3 --retry-all-errors -O \
+     https://mirrors.edge.kernel.org/pub/linux/kernel/v${KVER%%.*}.x/linux-$KVER.tar.xz
 tar xf linux-$KVER.tar.xz && cd linux-$KVER
 
 # 2. patches (adjust the path to wherever you cloned the repo)
@@ -185,6 +244,16 @@ sudo zstd -19 -f sound/soc/amd/acp/snd-acp-legacy-mach.ko -o $DEST/acp/snd-acp-l
 sudo depmod -a
 sudo systemctl reboot
 ```
+
+## What's in here
+
+| Path | What it does |
+|------|--------------|
+| `patches/` | The two DMI quirk patches. 22 added lines total. |
+| `scripts/install-dkms.sh` | Recommended. Installs the fix as a DKMS module so it survives kernel upgrades. |
+| `scripts/build-and-install.sh` | One-shot manual build. Re-run after every kernel upgrade. |
+| `scripts/doctor.sh` | Read-only diagnosis of why there is no sound, and what to run next. |
+| `lib/kernel-source.sh` | Shared source fetcher: mirror fallback, cache integrity, offline recovery. |
 
 ## How it works (one paragraph)
 

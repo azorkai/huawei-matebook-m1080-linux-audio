@@ -43,9 +43,10 @@ fi
 # --- stage the DKMS source tree -------------------------------------------
 echo "Staging DKMS source at $SRC ..."
 sudo rm -rf "$SRC"
-sudo install -d "$SRC/patches"
+sudo install -d "$SRC/patches" "$SRC/lib"
 sudo install -m 0644 "$REPO/dkms/dkms.conf"        "$SRC/dkms.conf"
 sudo install -m 0755 "$REPO/dkms/dkms-prebuild.sh" "$SRC/dkms-prebuild.sh"
+sudo install -m 0644 "$REPO/lib/kernel-source.sh"  "$SRC/lib/kernel-source.sh"
 sudo install -m 0644 "$REPO/patches/"*.patch       "$SRC/patches/"
 
 # --- (re)register and build ------------------------------------------------
@@ -64,8 +65,23 @@ sudo dkms install -m "$NAME" -v "$VER" -k "$KVER" --force
 echo
 echo "DKMS status:"
 sudo dkms status -m "$NAME"
+
+# Don't just print the status and hope. A DKMS build that fails leaves the module
+# merely "added", which looks close enough to "installed" that people miss it —
+# that is exactly how a machine ends up silent for weeks after a kernel upgrade.
+if ! sudo dkms status -m "$NAME" -v "$VER" -k "$KVER" | grep -q 'installed'; then
+    echo
+    echo "ERROR: the module is registered but NOT installed for $KVER." >&2
+    echo "Check the build log for the real cause:" >&2
+    echo "    sudo cat /var/lib/dkms/$NAME/$VER/build/make.log" >&2
+    exit 1
+fi
+
 echo
 echo "Done. Reboot to load the patched modules:"
 echo "    sudo systemctl reboot"
+echo
+echo "After rebooting, confirm the card appeared:"
+echo "    ./scripts/doctor.sh"
 echo
 echo "From now on every kernel upgrade rebuilds this automatically."

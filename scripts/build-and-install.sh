@@ -16,7 +16,6 @@ WORK="${WORK:-$HOME/.cache/matebook-m1080-build}"
 
 KVER_FULL="$(uname -r)"
 KVER="${KVER_FULL%%-*}"
-KMAJOR="${KVER%%.*}"
 
 echo "Running kernel  : $KVER_FULL"
 echo "Base version    : $KVER"
@@ -70,21 +69,21 @@ fi
 echo
 
 # --- fetch matching kernel source ------------------------------------------
-mkdir -p "$WORK"
-cd "$WORK"
+# Mirror fallback, cache integrity checks and offline recovery all live here, so
+# the manual path and the DKMS path behave identically when kernel.org is having
+# a bad day.
+# shellcheck source=../lib/kernel-source.sh
+source "$REPO_ROOT/lib/kernel-source.sh"
 
-SRC_DIR="linux-$KVER"
-TARBALL="linux-$KVER.tar.xz"
-URL="https://cdn.kernel.org/pub/linux/kernel/v${KMAJOR}.x/$TARBALL"
+mkdir -p "$WORK"
+m1080_fetch_source "$KVER" "$WORK"
+SRC_VERSION="$M1080_TARBALL_VERSION"
+SRC_DIR="$WORK/linux-$SRC_VERSION"
 
 if [ ! -d "$SRC_DIR" ]; then
-    if [ ! -s "$TARBALL" ]; then
-        echo "Downloading $URL ..."
-        curl -fL --retry 3 --progress-bar -o "$TARBALL.partial" "$URL"
-        mv "$TARBALL.partial" "$TARBALL"
-    fi
-    echo "Extracting $TARBALL ..."
-    tar xf "$TARBALL"
+    echo "Extracting $(basename "$M1080_TARBALL") ..."
+    mkdir -p "$SRC_DIR"
+    tar xf "$M1080_TARBALL" -C "$SRC_DIR" --strip-components=1
 fi
 
 cd "$SRC_DIR"
@@ -98,7 +97,7 @@ for p in "$PATCH_DIR"/*.patch; do
         echo "Applying $name"
         patch -p1 < "$p" >/dev/null
     else
-        echo "ERROR: $name does not apply cleanly to linux-$KVER." >&2
+        echo "ERROR: $name does not apply cleanly to linux-$SRC_VERSION." >&2
         echo "The source layout may have changed; please open an issue." >&2
         exit 1
     fi

@@ -8,34 +8,30 @@
 # config + symbols, and pins UTS_RELEASE so the resulting .ko loads cleanly.
 #
 # The kernel tarball is cached under /var/cache so repeated builds (and
-# different module versions) don't re-download it.
+# different module versions) don't re-download it. Source fetching, including
+# mirror fallback and offline recovery, lives in lib/kernel-source.sh.
 
 set -euo pipefail
 
 kernelver="${1:?usage: dkms-prebuild.sh <kernelver>}"
 base="${kernelver%%-*}"          # e.g. 7.0.10
-major="${base%%.*}"              # e.g. 7
 
-log() { echo "[m1080] $*"; }
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/kernel-source.sh
+source "$here/lib/kernel-source.sh"
 
-cache="/var/cache/matebook-m1080-audio"
-mkdir -p "$cache"
-tarball="$cache/linux-$base.tar.xz"
-url="https://cdn.kernel.org/pub/linux/kernel/v${major}.x/linux-$base.tar.xz"
+cache="${M1080_CACHE:-/var/cache/matebook-m1080-audio}"
 
-if [ ! -s "$tarball" ]; then
-    log "downloading kernel source $base from kernel.org ..."
-    curl -fL --retry 3 --retry-delay 2 -o "$tarball.partial" "$url"
-    mv "$tarball.partial" "$tarball"
-fi
+m1080_fetch_source "$base" "$cache"
+src_version="$M1080_TARBALL_VERSION"
 
-log "extracting source ..."
+m1080_log "extracting linux-$src_version source ..."
 rm -rf ksrc
 mkdir ksrc
-tar xf "$tarball" -C ksrc --strip-components=1
+tar xf "$M1080_TARBALL" -C ksrc --strip-components=1
 
-log "applying M1080 quirk patches ..."
-for p in patches/*.patch; do
+m1080_log "applying M1080 quirk patches ..."
+for p in "$here"/patches/*.patch; do
     patch -p1 -d ksrc < "$p"
 done
 
@@ -44,20 +40,20 @@ cd ksrc
 # Use the *target* kernel's own config so the module ABI lines up. Fall back to
 # the running kernel's /proc/config.gz only if the headers package is missing it.
 if [ -r "/lib/modules/$kernelver/build/.config" ]; then
-    log "using /lib/modules/$kernelver/build/.config"
+    m1080_log "using /lib/modules/$kernelver/build/.config"
     cp "/lib/modules/$kernelver/build/.config" .config
 elif [ -r /proc/config.gz ]; then
-    log "falling back to /proc/config.gz"
+    m1080_log "falling back to /proc/config.gz"
     zcat /proc/config.gz > .config
 else
-    log "ERROR: no kernel config available for $kernelver" >&2
+    m1080_log "ERROR: no kernel config available for $kernelver" >&2
     exit 1
 fi
 
 # Reuse the installed kernel's symbol CRCs so the modules are ABI-compatible
 # without rebuilding the whole kernel.
 if [ ! -r "/lib/modules/$kernelver/build/Module.symvers" ]; then
-    log "ERROR: Module.symvers missing — install the kernel headers for $kernelver" >&2
+    m1080_log "ERROR: Module.symvers missing — install the kernel headers for $kernelver" >&2
     exit 1
 fi
 cp "/lib/modules/$kernelver/build/Module.symvers" .
@@ -70,16 +66,16 @@ cp "/lib/modules/$kernelver/build/Module.symvers" .
 llvm_flag=()
 if grep -q '^CONFIG_CC_IS_CLANG=y' .config; then
     llvm_flag=(LLVM=1)
-    log "kernel built with Clang/LLD — using LLVM=1"
+    m1080_log "kernel built with Clang/LLD — using LLVM=1"
 else
-    log "kernel built with GCC"
+    m1080_log "kernel built with GCC"
 fi
 
-log "preparing build tree ..."
+m1080_log "preparing build tree ..."
 make "${llvm_flag[@]}" olddefconfig >/dev/null
 make "${llvm_flag[@]}" -j"$(nproc)" modules_prepare >/dev/null
 
 # Pin vermagic to the exact target so modprobe accepts the module unforced.
 echo "#define UTS_RELEASE \"$kernelver\"" > include/generated/utsrelease.h
 
-log "prebuild complete for $kernelver"
+m1080_log "prebuild complete for $kernelver (source linux-$src_version)"
